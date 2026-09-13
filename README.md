@@ -1,8 +1,8 @@
 # confkit
 
-Go library for authenticating messaging-platform microservices to HashiCorp Vault via AppRole at startup.
+Go library for loading HashiCorp Vault secrets into Go services at startup via AppRole.
 
-**This library fetches secrets once at startup and does not watch for changes.** There is no hot-reload, no `LifetimeWatcher`, and no long-lived Vault connection after bootstrap. Phase 1 covers authentication only; reading KV secrets comes next.
+**This library fetches secrets once at startup and does not watch for changes.** There is no hot-reload, no `LifetimeWatcher`, and no long-lived Vault connection after bootstrap.
 
 Module: `github.com/matfagroup/confkit`
 
@@ -16,18 +16,13 @@ Module: `github.com/matfagroup/confkit`
 | `VAULT_ROLE_ID` | yes, unless `APP_ENV=local` | — |
 | `VAULT_SECRET_ID_FILE` | no | `/run/secrets/vault_secret_id` |
 | `CONFKIT_TIMEOUT` | no | `60s` |
+| `CONFKIT_KV_MOUNT` | no | `kv` |
 
 The AppRole `secret_id` is read from the file at `VAULT_SECRET_ID_FILE`, never from an environment variable.
 
-When `APP_ENV=local`, `New` returns a loader with `IsLocal() == true` and never dials Vault. `TokenInfo` returns `(nil, nil)` in local mode.
+When `APP_ENV=local`, `New` returns a loader with `IsLocal() == true` and never dials Vault. `TokenInfo` returns `(nil, nil)` in local mode. `Into` fills fields from environment variables instead (see below).
 
-## Token use limits
-
-Our AppRole roles are configured with `token_num_uses=20`. Each authenticated Vault call consumes one use of the issued token. `cmd/probe` performs login, lookup-self, and revoke-self (three operations; fine for the ceiling).
-
-In the next phase each KV path read also consumes one use. A service that reads many paths can hit the ceiling and get HTTP 403 — which looks identical to a policy mistake. Plan path counts against `token_num_uses`, or raise the limit / use an unlimited token for high-path services. No code change in this phase — just do not lose hours debugging a 403 that is really use exhaustion.
-
-## Public API (phase 1)
+## Public API
 
 ```go
 opts, err := confkit.OptionsFromEnv()
@@ -35,64 +30,101 @@ loader, err := confkit.New(ctx, opts)
 defer loader.Close() // releases resources; does NOT revoke
 
 info, err := loader.TokenInfo(ctx) // (nil, nil) when local
-_ = loader.RevokeSelf(ctx)         // explicit; Close does not revoke
+
+var secrets MySecrets
+err = loader.Into(ctx, &secrets)
+fmt.Println(loader.SecretReads()) // reads performed by the most recent Into
+
+_ = loader.RevokeSelf(ctx) // explicit; Close does not revoke
 ```
 
 The raw Vault token is never exported.
 
-## Acceptance scenarios (`cmd/probe`)
+## Reading secrets with `Into`
 
-Build the probe:
+Tag string fields with `vault:"logical/path:key"`:
+
+```go
+type Secrets struct {
+    Postgres struct {
+        PrimaryUsername string `vault:"shared/postgres:primary_username"`
+        PrimaryPassword string `vault:"shared/postgres:primary_password"`
+    }
+    JWT struct {
+        AccessSecret string `vault:"self/jwt:access_secret"`
+    }
+}
+```
+
+**Only `string` fields are supported.** A non-string field with a `vault` tag is a fatal error. There is **no** `optional` modifier — every tagged field must be present. Untagged and unexported fields are skipped. Nested structs are walked recursively.
+
+### Path expansion
+
+| Logical path | Expands to (API) |
+|---|---|
+| `shared/postgres` | `{mount}/data/{env}/shared/postgres` |
+| `self/jwt` | `{mount}/data/{env}/{service}/jwt` |
+
+Default mount is `kv` (`CONFKIT_KV_MOUNT`). The `data` segment is required for KV v2; policies written against CLI paths without `data` will 403.
+
+Any prefix other than `shared/` or `self/` is a fatal configuration error.
+
+### One read per path
+
+`Into` groups fields by expanded path and issues **exactly one Vault read per distinct path**. Four fields on `shared/postgres` produce one request, not four. This matters because AppRole tokens use `token_num_uses=20`. `SecretReads()` reports the count for the most recent `Into` call (reset at the start of each call).
+
+### Local-mode environment names
+
+When `APP_ENV=local`, each tag maps to an environment variable by dropping the `shared/` or `self/` prefix, joining the remaining path segments and key with `_`, and uppercasing:
+
+| Tag | Environment variable |
+|---|---|
+| `shared/postgres:primary_username` | `POSTGRES_PRIMARY_USERNAME` |
+| `self/jwt:access_secret` | `JWT_ACCESS_SECRET` |
+
+If two tags would map to the same variable (e.g. `shared/alpha:user` and `self/alpha:user` → `ALPHA_USER`), `Into` fails with `ErrInvalidTag` in **all** modes — not only local — so collisions surface in shared environments.
+
+Local mode is the **only** environment fallback. Non-local `Into` never reads env vars.
+
+## Token use limits
+
+Our AppRole roles are configured with `token_num_uses=20`. Each authenticated Vault call consumes one use of the issued token. `cmd/probe` performs login, lookup-self, KV reads, and revoke-self.
+
+Each distinct KV path read consumes one use. Plan path counts against the ceiling, or raise `token_num_uses` for high-path services — a 403 from use exhaustion looks identical to a policy mistake.
+
+## Acceptance scenarios (`cmd/probe`)
 
 ```sh
 go build -o bin/probe ./cmd/probe
 ```
 
-### 1. Vault healthy and unsealed
+### Auth (phase 1)
 
-```sh
-export APP_ENV=dev
-export SERVICE_NAME=probe
-export VAULT_ADDR=http://127.0.0.1:8200
-export VAULT_ROLE_ID=...
-export VAULT_SECRET_ID_FILE=/path/to/secret_id
+1. Vault healthy → login OK, accessor/TTL/policies, revoke clean  
+2. Vault sealed → retries then timeout naming sealed  
+3. Wrong `VAULT_ROLE_ID` → fail-fast, invalid credentials  
+4. `APP_ENV=local` → immediate, no network  
 
-./bin/probe
-```
+### Secrets (phase 2)
 
-Expect: login succeeds, prints accessor / TTL / policies, revokes cleanly, exit 0.
+After auth output, probe fills a synthetic struct via `Into`, prints masked values with lengths, and the read count.
 
-### 2. Vault sealed
+1. Valid struct → fields filled, `reads` equals distinct paths  
+2. Missing key → error naming field, path, and key  
+3. Path denied by policy → error naming the expanded API path  
+4. Non-string tagged field → fatal error naming field and type  
+5. `APP_ENV=local` with the env vars above → filled, `reads: 0`  
 
-Seal Vault (or point at a sealed instance) and run the same command with a short timeout:
-
-```sh
-export CONFKIT_TIMEOUT=5s
-./bin/probe
-```
-
-Expect: INFO retry lines in the log, then a timeout error whose cause names sealed (`errors.Is(err, confkit.ErrSealed)` and `errors.Is(err, confkit.ErrTimeout)` both hold). Non-zero exit.
-
-### 3. Wrong `VAULT_ROLE_ID`
-
-```sh
-export VAULT_ROLE_ID=definitely-wrong
-./bin/probe
-```
-
-Expect: failure in under a second, no retries, message clearly indicates invalid credentials. Non-zero exit.
-
-### 4. Local mode
+For local probe:
 
 ```sh
 export APP_ENV=local
 export SERVICE_NAME=probe
-# VAULT_* not required
-
+export ALPHA_USER=...
+export ALPHA_PASS=...
+export BETA_TOKEN=...
 ./bin/probe
 ```
-
-Expect: returns immediately, `local: true`, no network activity, exit 0.
 
 ## Develop
 

@@ -14,6 +14,7 @@ const (
 	defaultRetryBase    = 500 * time.Millisecond
 	defaultRetryMult    = 2.0
 	defaultRetryCap     = 5 * time.Second
+	defaultKVMount      = "kv"
 )
 
 // RetryPolicy controls exponential backoff between transient failures.
@@ -30,6 +31,7 @@ type Options struct {
 	Service      string // SERVICE_NAME
 	RoleID       string // VAULT_ROLE_ID
 	SecretIDFile string // path to the file holding the secret_id
+	KVMount      string // CONFKIT_KV_MOUNT — KV v2 mount name, default "kv"
 	Timeout      time.Duration
 	Retry        RetryPolicy
 	Logger       *slog.Logger // nil means slog.Default()
@@ -43,6 +45,7 @@ func OptionsFromEnv() (Options, error) {
 	addr := strings.TrimSpace(os.Getenv("VAULT_ADDR"))
 	roleID := strings.TrimSpace(os.Getenv("VAULT_ROLE_ID"))
 	secretFile := strings.TrimSpace(os.Getenv("VAULT_SECRET_ID_FILE"))
+	kvMount := strings.TrimSpace(os.Getenv("CONFKIT_KV_MOUNT"))
 	timeoutRaw := strings.TrimSpace(os.Getenv("CONFKIT_TIMEOUT"))
 
 	local := strings.EqualFold(env, "local")
@@ -72,6 +75,7 @@ func OptionsFromEnv() (Options, error) {
 		Service:      service,
 		RoleID:       roleID,
 		SecretIDFile: secretFile,
+		KVMount:      kvMount,
 		Timeout:      defaultTimeout,
 		Retry: RetryPolicy{
 			Base:       defaultRetryBase,
@@ -97,6 +101,9 @@ func OptionsFromEnv() (Options, error) {
 func (o Options) withDefaults() Options {
 	if o.SecretIDFile == "" {
 		o.SecretIDFile = defaultSecretIDFile
+	}
+	if o.KVMount == "" {
+		o.KVMount = defaultKVMount
 	}
 	if o.Timeout <= 0 {
 		o.Timeout = defaultTimeout

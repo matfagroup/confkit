@@ -17,12 +17,14 @@ import (
 // The next phase adds an Into method for reading secrets into structs.
 // There is no exported way to obtain the raw token string.
 type Loader struct {
-	client  *api.Client
-	env     string
-	service string
-	local   bool
-	logger  *slog.Logger
-	closed  bool
+	client      *api.Client
+	env         string
+	service     string
+	kvMount     string
+	local       bool
+	logger      *slog.Logger
+	closed      bool
+	secretReads int // reads performed by the most recent Into call
 }
 
 // New authenticates to Vault with AppRole using opts, or returns a local
@@ -43,6 +45,7 @@ func New(ctx context.Context, opts Options) (*Loader, error) {
 		return &Loader{
 			env:     opts.Env,
 			service: opts.Service,
+			kvMount: opts.KVMount,
 			local:   true,
 			logger:  opts.Logger,
 		}, nil
@@ -106,6 +109,7 @@ func New(ctx context.Context, opts Options) (*Loader, error) {
 				client:  client,
 				env:     opts.Env,
 				service: opts.Service,
+				kvMount: opts.KVMount,
 				local:   false,
 				logger:  opts.Logger,
 			}, nil

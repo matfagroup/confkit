@@ -95,6 +95,9 @@ func TestWithDefaults(t *testing.T) {
 	if opts.SecretIDFile != defaultSecretIDFile {
 		t.Fatalf("SecretIDFile=%q", opts.SecretIDFile)
 	}
+	if opts.KVMount != defaultKVMount {
+		t.Fatalf("KVMount=%q", opts.KVMount)
+	}
 	if opts.Timeout != defaultTimeout {
 		t.Fatalf("Timeout=%v", opts.Timeout)
 	}
@@ -103,5 +106,20 @@ func TestWithDefaults(t *testing.T) {
 	}
 	if opts.Logger == nil {
 		t.Fatal("Logger nil")
+	}
+}
+
+func TestOptionsFromEnv_kvMount(t *testing.T) {
+	t.Setenv("APP_ENV", "dev")
+	t.Setenv("SERVICE_NAME", "chat")
+	t.Setenv("VAULT_ADDR", "http://127.0.0.1:8200")
+	t.Setenv("VAULT_ROLE_ID", "role")
+	t.Setenv("CONFKIT_KV_MOUNT", "secret")
+	opts, err := OptionsFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.KVMount != "secret" {
+		t.Fatalf("KVMount=%q", opts.KVMount)
 	}
 }

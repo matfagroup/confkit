@@ -19,6 +19,9 @@ var (
 	ErrTimeout            = errors.New("timeout")
 	ErrPermissionDenied   = errors.New("permission denied")
 	ErrAuthNotMounted     = errors.New("approle auth not mounted")
+	ErrPathNotFound       = errors.New("secret path not found")
+	ErrKeyNotFound        = errors.New("secret key not found")
+	ErrInvalidTag         = errors.New("invalid vault tag")
 )
 
 // classify maps an underlying failure to a sentinel and whether it is
