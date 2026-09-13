@@ -30,7 +30,7 @@ func (l *Loader) Into(ctx context.Context, dst any) error {
 		mount = defaultKVMount
 	}
 
-	bindings, err := collectBindings(dst, l.env, l.service, mount)
+	bindings, err := collectBindings(dst, l.env, l.service, mount, l.prefix)
 	if err != nil {
 		return err
 	}

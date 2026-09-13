@@ -35,7 +35,7 @@ func parseVaultTag(tag string) (logicalPath, key string, err error) {
 }
 
 // collectBindings walks dst (pointer to struct) and returns every vault-tagged field.
-func collectBindings(dst any, env, service, mount string) ([]fieldBinding, error) {
+func collectBindings(dst any, env, service, mount, pathPrefix string) ([]fieldBinding, error) {
 	v := reflect.ValueOf(dst)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
 		return nil, fmt.Errorf("%w: dst must be a non-nil pointer to a struct", ErrInvalidTag)
@@ -46,7 +46,7 @@ func collectBindings(dst any, env, service, mount string) ([]fieldBinding, error
 	}
 
 	var out []fieldBinding
-	if err := walkStruct(v, v.Type().Name(), env, service, mount, &out); err != nil {
+	if err := walkStruct(v, v.Type().Name(), env, service, mount, pathPrefix, &out); err != nil {
 		return nil, err
 	}
 
@@ -56,7 +56,7 @@ func collectBindings(dst any, env, service, mount string) ([]fieldBinding, error
 	return out, nil
 }
 
-func walkStruct(v reflect.Value, prefix, env, service, mount string, out *[]fieldBinding) error {
+func walkStruct(v reflect.Value, fieldPrefix, env, service, mount, pathPrefix string, out *[]fieldBinding) error {
 	t := v.Type()
 	for i := 0; i < t.NumField(); i++ {
 		sf := t.Field(i)
@@ -64,8 +64,8 @@ func walkStruct(v reflect.Value, prefix, env, service, mount string, out *[]fiel
 			continue // unexported
 		}
 		fv := v.Field(i)
-		fieldPath := prefix + "." + sf.Name
-		if prefix == "" {
+		fieldPath := fieldPrefix + "." + sf.Name
+		if fieldPrefix == "" {
 			fieldPath = sf.Name
 		}
 
@@ -76,7 +76,7 @@ func walkStruct(v reflect.Value, prefix, env, service, mount string, out *[]fiel
 			if hasTag {
 				return fmt.Errorf("%w: field %s has type %s, only string is supported", ErrInvalidTag, fieldPath, fv.Type())
 			}
-			if err := walkStruct(fv, fieldPath, env, service, mount, out); err != nil {
+			if err := walkStruct(fv, fieldPath, env, service, mount, pathPrefix, out); err != nil {
 				return err
 			}
 			continue
@@ -88,7 +88,7 @@ func walkStruct(v reflect.Value, prefix, env, service, mount string, out *[]fiel
 				continue
 			}
 			if fv.Elem().Kind() == reflect.Struct {
-				if err := walkStruct(fv.Elem(), fieldPath, env, service, mount, out); err != nil {
+				if err := walkStruct(fv.Elem(), fieldPath, env, service, mount, pathPrefix, out); err != nil {
 					return err
 				}
 			}
@@ -109,7 +109,7 @@ func walkStruct(v reflect.Value, prefix, env, service, mount string, out *[]fiel
 		if err != nil {
 			return fmt.Errorf("%w: field %s: %v", ErrInvalidTag, fieldPath, err)
 		}
-		secretPath, apiPath, err := expandPath(logical, env, service, mount)
+		secretPath, apiPath, err := expandPath(logical, env, service, mount, pathPrefix)
 		if err != nil {
 			return fmt.Errorf("%w: field %s: %v", ErrInvalidTag, fieldPath, err)
 		}

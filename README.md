@@ -17,6 +17,7 @@ Module: `github.com/matfagroup/confkit`
 | `VAULT_SECRET_ID_FILE` | no | `/run/secrets/vault_secret_id` |
 | `CONFKIT_TIMEOUT` | no | `60s` |
 | `CONFKIT_KV_MOUNT` | no | `kv` |
+| `CONFKIT_PREFIX` | no | empty |
 
 The AppRole `secret_id` is read from the file at `VAULT_SECRET_ID_FILE`, never from an environment variable.
 
@@ -60,14 +61,16 @@ type Secrets struct {
 
 ### Path expansion
 
-| Logical path | Expands to (API) |
-|---|---|
-| `shared/postgres` | `{mount}/data/{env}/shared/postgres` |
-| `self/jwt` | `{mount}/data/{env}/{service}/jwt` |
+| Logical path | Expands to (API), prefix empty | Expands to (API), with prefix |
+|---|---|---|
+| `shared/postgres` | `{mount}/data/{env}/shared/postgres` | `{mount}/data/{prefix}/{env}/shared/postgres` |
+| `self/jwt` | `{mount}/data/{env}/{service}/jwt` | `{mount}/data/{prefix}/{env}/{service}/jwt` |
 
 Default mount is `kv` (`CONFKIT_KV_MOUNT`). The `data` segment is required for KV v2; policies written against CLI paths without `data` will 403.
 
-Any prefix other than `shared/` or `self/` is a fatal configuration error.
+`CONFKIT_PREFIX` is an optional single path segment under the mount that groups one platform's secrets when several platforms share the same KV engine. Empty (the default) preserves paths rooted at `{env}/...`. Our messenger platform uses `CONFKIT_PREFIX=messenger`, so a tag `shared/postgres` becomes `kv/data/messenger/dev/shared/postgres` — not `kv/data/dev/shared/postgres`.
+
+Any logical-path prefix other than `shared/` or `self/` is a fatal configuration error.
 
 ### One read per path
 

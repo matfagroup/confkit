@@ -21,6 +21,7 @@ type Loader struct {
 	env         string
 	service     string
 	kvMount     string
+	prefix      string
 	local       bool
 	logger      *slog.Logger
 	closed      bool
@@ -41,11 +42,18 @@ func New(ctx context.Context, opts Options) (*Loader, error) {
 		return nil, fmt.Errorf("%w: Service", ErrMissingConfig)
 	}
 
+	prefix, err := validatePrefix(opts.Prefix)
+	if err != nil {
+		return nil, err
+	}
+	opts.Prefix = prefix
+
 	if isLocalEnv(opts.Env) {
 		return &Loader{
 			env:     opts.Env,
 			service: opts.Service,
 			kvMount: opts.KVMount,
+			prefix:  opts.Prefix,
 			local:   true,
 			logger:  opts.Logger,
 		}, nil
@@ -102,6 +110,8 @@ func New(ctx context.Context, opts Options) (*Loader, error) {
 				"address", opts.Address,
 				"env", opts.Env,
 				"service", opts.Service,
+				"prefix", opts.Prefix,
+				"mount", opts.KVMount,
 				"accessor", accessor,
 				"ttl", ttl.String(),
 			)
@@ -110,6 +120,7 @@ func New(ctx context.Context, opts Options) (*Loader, error) {
 				env:     opts.Env,
 				service: opts.Service,
 				kvMount: opts.KVMount,
+				prefix:  opts.Prefix,
 				local:   false,
 				logger:  opts.Logger,
 			}, nil

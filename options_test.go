@@ -15,10 +15,14 @@ func TestOptionsFromEnv_defaults(t *testing.T) {
 	t.Setenv("VAULT_ROLE_ID", "role-abc")
 	os.Unsetenv("VAULT_SECRET_ID_FILE")
 	os.Unsetenv("CONFKIT_TIMEOUT")
+	os.Unsetenv("CONFKIT_PREFIX")
 
 	opts, err := OptionsFromEnv()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if opts.Prefix != "" {
+		t.Fatalf("Prefix=%q, want empty", opts.Prefix)
 	}
 	if opts.SecretIDFile != defaultSecretIDFile {
 		t.Fatalf("SecretIDFile=%q, want %q", opts.SecretIDFile, defaultSecretIDFile)
@@ -121,5 +125,20 @@ func TestOptionsFromEnv_kvMount(t *testing.T) {
 	}
 	if opts.KVMount != "secret" {
 		t.Fatalf("KVMount=%q", opts.KVMount)
+	}
+}
+
+func TestOptionsFromEnv_prefix(t *testing.T) {
+	t.Setenv("APP_ENV", "dev")
+	t.Setenv("SERVICE_NAME", "chat")
+	t.Setenv("VAULT_ADDR", "http://127.0.0.1:8200")
+	t.Setenv("VAULT_ROLE_ID", "role")
+	t.Setenv("CONFKIT_PREFIX", "messenger")
+	opts, err := OptionsFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Prefix != "messenger" {
+		t.Fatalf("Prefix=%q", opts.Prefix)
 	}
 }

@@ -8,9 +8,16 @@ import (
 // expandPath turns a logical vault tag path into the secret path for
 // KVv2.Get and the full API path used in error messages.
 //
+// With pathPrefix empty:
+//
 //	shared/alpha  → secret "{env}/shared/alpha",  api "{mount}/data/{env}/shared/alpha"
 //	self/beta     → secret "{env}/{service}/beta", api "{mount}/data/{env}/{service}/beta"
-func expandPath(logical, env, service, mount string) (secretPath, apiPath string, err error) {
+//
+// With pathPrefix set (e.g. "messenger"):
+//
+//	shared/alpha  → secret "{prefix}/{env}/shared/alpha"
+//	self/beta     → secret "{prefix}/{env}/{service}/beta"
+func expandPath(logical, env, service, mount, pathPrefix string) (secretPath, apiPath string, err error) {
 	logical = strings.TrimSpace(logical)
 	switch {
 	case strings.HasPrefix(logical, "shared/"):
@@ -27,6 +34,9 @@ func expandPath(logical, env, service, mount string) (secretPath, apiPath string
 		secretPath = env + "/" + service + "/" + rest
 	default:
 		return "", "", fmt.Errorf("%w: unknown path prefix in %q (want shared/ or self/)", ErrInvalidTag, logical)
+	}
+	if pathPrefix != "" {
+		secretPath = pathPrefix + "/" + secretPath
 	}
 	apiPath = mount + "/data/" + secretPath
 	return secretPath, apiPath, nil
@@ -52,4 +62,23 @@ func envVarFromTag(logicalPath, key string) string {
 		parts[i] = strings.ToUpper(p)
 	}
 	return strings.Join(parts, "_")
+}
+
+// validatePrefix trims surrounding whitespace and checks that prefix is a
+// single path segment (or empty). The trimmed value is returned for storage.
+func validatePrefix(prefix string) (string, error) {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return "", nil
+	}
+	if prefix == "." || prefix == ".." {
+		return "", fmt.Errorf("%w: CONFKIT_PREFIX %q is not allowed", ErrMissingConfig, prefix)
+	}
+	if strings.Contains(prefix, "/") {
+		return "", fmt.Errorf("%w: CONFKIT_PREFIX %q must be a single path segment (no slashes)", ErrMissingConfig, prefix)
+	}
+	if strings.ContainsAny(prefix, " \t\n\r") {
+		return "", fmt.Errorf("%w: CONFKIT_PREFIX %q must not contain whitespace", ErrMissingConfig, prefix)
+	}
+	return prefix, nil
 }

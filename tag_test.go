@@ -48,7 +48,7 @@ func TestCollectBindings_unknownPrefix(t *testing.T) {
 	var dst struct {
 		X string `vault:"other/thing:key"`
 	}
-	_, err := collectBindings(&dst, "dev", "svc", "kv")
+	_, err := collectBindings(&dst, "dev", "svc", "kv", "")
 	if !errors.Is(err, ErrInvalidTag) {
 		t.Fatalf("got %v", err)
 	}
@@ -62,7 +62,7 @@ func TestCollectBindings_envCollision(t *testing.T) {
 		A string `vault:"shared/alpha:user"`
 		B string `vault:"self/alpha:user"`
 	}
-	_, err := collectBindings(&dst, "dev", "svc", "kv")
+	_, err := collectBindings(&dst, "dev", "svc", "kv", "")
 	if !errors.Is(err, ErrInvalidTag) {
 		t.Fatalf("got %v", err)
 	}
@@ -75,7 +75,7 @@ func TestCollectBindings_nonStringTagged(t *testing.T) {
 	var dst struct {
 		N int `vault:"shared/alpha:n"`
 	}
-	_, err := collectBindings(&dst, "dev", "svc", "kv")
+	_, err := collectBindings(&dst, "dev", "svc", "kv", "")
 	if !errors.Is(err, ErrInvalidTag) {
 		t.Fatalf("got %v", err)
 	}

@@ -32,6 +32,7 @@ type Options struct {
 	RoleID       string // VAULT_ROLE_ID
 	SecretIDFile string // path to the file holding the secret_id
 	KVMount      string // CONFKIT_KV_MOUNT — KV v2 mount name, default "kv"
+	Prefix       string // CONFKIT_PREFIX — optional single path segment under the mount; default ""
 	Timeout      time.Duration
 	Retry        RetryPolicy
 	Logger       *slog.Logger // nil means slog.Default()
@@ -46,6 +47,7 @@ func OptionsFromEnv() (Options, error) {
 	roleID := strings.TrimSpace(os.Getenv("VAULT_ROLE_ID"))
 	secretFile := strings.TrimSpace(os.Getenv("VAULT_SECRET_ID_FILE"))
 	kvMount := strings.TrimSpace(os.Getenv("CONFKIT_KV_MOUNT"))
+	prefix := os.Getenv("CONFKIT_PREFIX") // trimmed/validated in New
 	timeoutRaw := strings.TrimSpace(os.Getenv("CONFKIT_TIMEOUT"))
 
 	local := strings.EqualFold(env, "local")
@@ -76,6 +78,7 @@ func OptionsFromEnv() (Options, error) {
 		RoleID:       roleID,
 		SecretIDFile: secretFile,
 		KVMount:      kvMount,
+		Prefix:       prefix,
 		Timeout:      defaultTimeout,
 		Retry: RetryPolicy{
 			Base:       defaultRetryBase,

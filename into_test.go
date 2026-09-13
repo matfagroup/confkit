@@ -311,6 +311,83 @@ func TestErrSecretNotFound_isUsed(t *testing.T) {
 	}
 }
 
+func TestInto_prefixMountSharedAndSelf(t *testing.T) {
+	var seenShared, seenSelf atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/approle/login":
+			writeLogin(w)
+		case "/v1/secret/data/messenger/dev/shared/alpha":
+			seenShared.Store(true)
+			writeKV(w, map[string]string{"user": "u"})
+		case "/v1/secret/data/messenger/dev/probe/beta":
+			seenSelf.Store(true)
+			writeKV(w, map[string]string{"token": "t"})
+		default:
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	sid := filepath.Join(t.TempDir(), "sid")
+	if err := os.WriteFile(sid, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := New(context.Background(), Options{
+		Address:      srv.URL,
+		Env:          "dev",
+		Service:      "probe",
+		RoleID:       "role",
+		SecretIDFile: sid,
+		Timeout:      5 * time.Second,
+		KVMount:      "secret",
+		Prefix:       "  messenger  ", // trimmed before store
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loader.Close()
+	if loader.prefix != "messenger" {
+		t.Fatalf("stored prefix=%q", loader.prefix)
+	}
+
+	var dst struct {
+		User  string `vault:"shared/alpha:user"`
+		Token string `vault:"self/beta:token"`
+	}
+	if err := loader.Into(context.Background(), &dst); err != nil {
+		t.Fatal(err)
+	}
+	if !seenShared.Load() || !seenSelf.Load() {
+		t.Fatal("expected both shared and self API paths")
+	}
+	if dst.User != "u" || dst.Token != "t" {
+		t.Fatalf("%+v", dst)
+	}
+	if loader.SecretReads() != 2 {
+		t.Fatalf("SecretReads=%d", loader.SecretReads())
+	}
+}
+
+func TestNew_rejectsInvalidPrefix(t *testing.T) {
+	for _, bad := range []string{"/messenger", "messenger/", "a/b", "mess enger", ".", ".."} {
+		t.Run(bad, func(t *testing.T) {
+			_, err := New(context.Background(), Options{
+				Env:     "local",
+				Service: "probe",
+				Prefix:  bad,
+			})
+			if !errors.Is(err, ErrMissingConfig) {
+				t.Fatalf("Prefix=%q: got %v", bad, err)
+			}
+			if !strings.Contains(err.Error(), bad) {
+				t.Fatalf("error should name %q: %v", bad, err)
+			}
+		})
+	}
+}
+
 func writeLogin(w http.ResponseWriter) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"auth": map[string]interface{}{
