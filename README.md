@@ -1,93 +1,105 @@
-# messenger-confkit
+# confkit
 
+Go library for authenticating messaging-platform microservices to HashiCorp Vault via AppRole at startup.
 
+**This library fetches secrets once at startup and does not watch for changes.** There is no hot-reload, no `LifetimeWatcher`, and no long-lived Vault connection after bootstrap. Phase 1 covers authentication only; reading KV secrets comes next.
 
-## Getting started
+Module: `github.com/matfagroup/confkit`
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Environment variables
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+| Variable | Required | Default |
+|---|---|---|
+| `APP_ENV` | yes | — (`dev` \| `staging` \| `prod` \| `local`) |
+| `SERVICE_NAME` | yes | — |
+| `VAULT_ADDR` | yes, unless `APP_ENV=local` | — |
+| `VAULT_ROLE_ID` | yes, unless `APP_ENV=local` | — |
+| `VAULT_SECRET_ID_FILE` | no | `/run/secrets/vault_secret_id` |
+| `CONFKIT_TIMEOUT` | no | `60s` |
 
-## Add your files
+The AppRole `secret_id` is read from the file at `VAULT_SECRET_ID_FILE`, never from an environment variable.
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+When `APP_ENV=local`, `New` returns a loader with `IsLocal() == true` and never dials Vault. `TokenInfo` returns `(nil, nil)` in local mode.
 
+## Token use limits
+
+Our AppRole roles are configured with `token_num_uses=20`. Each authenticated Vault call consumes one use of the issued token. `cmd/probe` performs login, lookup-self, and revoke-self (three operations; fine for the ceiling).
+
+In the next phase each KV path read also consumes one use. A service that reads many paths can hit the ceiling and get HTTP 403 — which looks identical to a policy mistake. Plan path counts against `token_num_uses`, or raise the limit / use an unlimited token for high-path services. No code change in this phase — just do not lose hours debugging a 403 that is really use exhaustion.
+
+## Public API (phase 1)
+
+```go
+opts, err := confkit.OptionsFromEnv()
+loader, err := confkit.New(ctx, opts)
+defer loader.Close() // releases resources; does NOT revoke
+
+info, err := loader.TokenInfo(ctx) // (nil, nil) when local
+_ = loader.RevokeSelf(ctx)         // explicit; Close does not revoke
 ```
-cd existing_repo
-git remote add origin https://hamgit.ir/matfa-software-project/messenger-group/messenger-backend-group/messenger-configs-group/messenger-confkit.git
-git branch -M main
-git push -uf origin main
+
+The raw Vault token is never exported.
+
+## Acceptance scenarios (`cmd/probe`)
+
+Build the probe:
+
+```sh
+go build -o bin/probe ./cmd/probe
 ```
 
-## Integrate with your tools
+### 1. Vault healthy and unsealed
 
-* [Set up project integrations](https://hamgit.ir/matfa-software-project/messenger-group/messenger-backend-group/messenger-configs-group/messenger-confkit/-/settings/integrations)
+```sh
+export APP_ENV=dev
+export SERVICE_NAME=probe
+export VAULT_ADDR=http://127.0.0.1:8200
+export VAULT_ROLE_ID=...
+export VAULT_SECRET_ID_FILE=/path/to/secret_id
 
-## Collaborate with your team
+./bin/probe
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+Expect: login succeeds, prints accessor / TTL / policies, revokes cleanly, exit 0.
 
-## Test and Deploy
+### 2. Vault sealed
 
-Use the built-in continuous integration in GitLab.
+Seal Vault (or point at a sealed instance) and run the same command with a short timeout:
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+```sh
+export CONFKIT_TIMEOUT=5s
+./bin/probe
+```
 
-***
+Expect: INFO retry lines in the log, then a timeout error whose cause names sealed (`errors.Is(err, confkit.ErrSealed)` and `errors.Is(err, confkit.ErrTimeout)` both hold). Non-zero exit.
 
-# Editing this README
+### 3. Wrong `VAULT_ROLE_ID`
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```sh
+export VAULT_ROLE_ID=definitely-wrong
+./bin/probe
+```
 
-## Suggestions for a good README
+Expect: failure in under a second, no retries, message clearly indicates invalid credentials. Non-zero exit.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### 4. Local mode
 
-## Name
-Choose a self-explaining name for your project.
+```sh
+export APP_ENV=local
+export SERVICE_NAME=probe
+# VAULT_* not required
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+./bin/probe
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Expect: returns immediately, `local: true`, no network activity, exit 0.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Develop
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+```sh
+go test ./...
+go vet ./...
+go build ./...
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Only dependency: `github.com/hashicorp/vault/api`. Logging uses `log/slog`.
