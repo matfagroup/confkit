@@ -219,9 +219,9 @@ func TestInto_badDestination(t *testing.T) {
 }
 
 func TestInto_localMode(t *testing.T) {
-	t.Setenv("ALPHA_USER", "lu")
-	t.Setenv("ALPHA_PASS", "lp")
-	t.Setenv("BETA_TOKEN", "lt")
+	t.Setenv("USER", "lu")
+	t.Setenv("PASS", "lp")
+	t.Setenv("TOKEN", "lt")
 
 	loader, err := New(context.Background(), Options{Env: "local", Service: "probe"})
 	if err != nil {
@@ -245,9 +245,33 @@ func TestInto_localMode(t *testing.T) {
 	}
 }
 
+func TestInto_localModePrefixedKeys(t *testing.T) {
+	t.Setenv("REDIS_PASSWORD", "rp")
+	t.Setenv("JWT_WEB_ACCESS_SECRET", "jw")
+	t.Setenv("OTP_FIXED_CODE", "123456")
+
+	loader, err := New(context.Background(), Options{Env: "local", Service: "user-auth-service"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loader.Close()
+
+	var dst struct {
+		RedisPassword string `vault:"shared/redis:REDIS_PASSWORD"`
+		JWTSecret     string `vault:"self/jwt:JWT_WEB_ACCESS_SECRET"`
+		OTPFixed      string `vault:"self/auth:OTP_FIXED_CODE"`
+	}
+	if err := loader.Into(context.Background(), &dst); err != nil {
+		t.Fatal(err)
+	}
+	if dst.RedisPassword != "rp" || dst.JWTSecret != "jw" || dst.OTPFixed != "123456" {
+		t.Fatalf("%+v", dst)
+	}
+}
+
 func TestInto_localMissingVars(t *testing.T) {
-	os.Unsetenv("ALPHA_USER")
-	os.Unsetenv("ALPHA_PASS")
+	t.Setenv("USER", "")
+	t.Setenv("PASS", "")
 
 	loader, err := New(context.Background(), Options{Env: "local", Service: "probe"})
 	if err != nil {
@@ -264,7 +288,8 @@ func TestInto_localMissingVars(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "ALPHA_USER") || !strings.Contains(msg, "ALPHA_PASS") {
+	if !strings.Contains(msg, "environment variable USER not set") ||
+		!strings.Contains(msg, "environment variable PASS not set") {
 		t.Fatalf("msg=%v", msg)
 	}
 }

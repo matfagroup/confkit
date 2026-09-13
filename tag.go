@@ -121,7 +121,7 @@ func walkStruct(v reflect.Value, fieldPrefix, env, service, mount, pathPrefix st
 			key:        key,
 			secretPath: secretPath,
 			apiPath:    apiPath,
-			envVar:     envVarFromTag(logical, key),
+			envVar:     envVarFromTag(key),
 			tag:        tag,
 		})
 	}

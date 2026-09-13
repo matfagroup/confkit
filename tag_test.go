@@ -66,7 +66,7 @@ func TestCollectBindings_envCollision(t *testing.T) {
 	if !errors.Is(err, ErrInvalidTag) {
 		t.Fatalf("got %v", err)
 	}
-	if !strings.Contains(err.Error(), "collides") || !strings.Contains(err.Error(), "ALPHA_USER") {
+	if !strings.Contains(err.Error(), "env var USER collides") {
 		t.Fatalf("msg=%v", err)
 	}
 }

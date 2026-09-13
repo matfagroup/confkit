@@ -78,14 +78,16 @@ Any logical-path prefix other than `shared/` or `self/` is a fatal configuration
 
 ### Local-mode environment names
 
-When `APP_ENV=local`, each tag maps to an environment variable by dropping the `shared/` or `self/` prefix, joining the remaining path segments and key with `_`, and uppercasing:
+When `APP_ENV=local`, each tag maps to an environment variable by taking the Vault key alone and uppercasing it. Path segments are not part of the name, so keys that already carry a domain prefix keep the names developers already use:
 
 | Tag | Environment variable |
 |---|---|
-| `shared/postgres:primary_username` | `POSTGRES_PRIMARY_USERNAME` |
-| `self/jwt:access_secret` | `JWT_ACCESS_SECRET` |
+| `shared/redis:REDIS_PASSWORD` | `REDIS_PASSWORD` |
+| `self/jwt:JWT_WEB_ACCESS_SECRET` | `JWT_WEB_ACCESS_SECRET` |
+| `self/auth:OTP_FIXED_CODE` | `OTP_FIXED_CODE` |
+| `shared/alpha:user` | `USER` |
 
-If two tags would map to the same variable (e.g. `shared/alpha:user` and `self/alpha:user` → `ALPHA_USER`), `Into` fails with `ErrInvalidTag` in **all** modes — not only local — so collisions surface in shared environments.
+If two tags would map to the same variable (e.g. `shared/alpha:user` and `self/jwt:user` → `USER`), `Into` fails with `ErrInvalidTag` in **all** modes — not only local — so collisions surface in shared environments.
 
 Local mode is the **only** environment fallback. Non-local `Into` never reads env vars.
 
@@ -123,9 +125,9 @@ For local probe:
 ```sh
 export APP_ENV=local
 export SERVICE_NAME=probe
-export ALPHA_USER=...
-export ALPHA_PASS=...
-export BETA_TOKEN=...
+export USER=...
+export PASS=...
+export TOKEN=...
 ./bin/probe
 ```
 

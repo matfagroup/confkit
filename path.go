@@ -42,26 +42,16 @@ func expandPath(logical, env, service, mount, pathPrefix string) (secretPath, ap
 	return secretPath, apiPath, nil
 }
 
-// envVarFromTag derives the local-mode environment variable name.
-// Drops the shared/ or self/ prefix, joins remaining path segments and
-// the key with underscores, and uppercases the result.
+// envVarFromTag derives the local-mode environment variable name from the
+// Vault key alone, uppercased. Path segments are omitted so a key that
+// already carries its domain prefix maps to the same name developers use
+// in .env files.
 //
-//	shared/alpha:user_name → ALPHA_USER_NAME
-//	self/beta:token        → BETA_TOKEN
-func envVarFromTag(logicalPath, key string) string {
-	rest := logicalPath
-	switch {
-	case strings.HasPrefix(rest, "shared/"):
-		rest = strings.TrimPrefix(rest, "shared/")
-	case strings.HasPrefix(rest, "self/"):
-		rest = strings.TrimPrefix(rest, "self/")
-	}
-	parts := strings.Split(rest, "/")
-	parts = append(parts, key)
-	for i, p := range parts {
-		parts[i] = strings.ToUpper(p)
-	}
-	return strings.Join(parts, "_")
+//	shared/redis:REDIS_PASSWORD          → REDIS_PASSWORD
+//	self/jwt:JWT_WEB_ACCESS_SECRET       → JWT_WEB_ACCESS_SECRET
+//	self/auth:OTP_FIXED_CODE             → OTP_FIXED_CODE
+func envVarFromTag(key string) string {
+	return strings.ToUpper(key)
 }
 
 // validatePrefix trims surrounding whitespace and checks that prefix is a

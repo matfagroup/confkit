@@ -108,16 +108,19 @@ func TestExpandPath(t *testing.T) {
 
 func TestEnvVarFromTag(t *testing.T) {
 	tests := []struct {
-		logical, key, want string
+		key, want string
 	}{
-		{"shared/alpha", "user_name", "ALPHA_USER_NAME"},
-		{"self/beta", "token", "BETA_TOKEN"},
-		{"shared/foo/bar", "baz", "FOO_BAR_BAZ"},
+		{"user_name", "USER_NAME"},
+		{"token", "TOKEN"},
+		{"REDIS_PASSWORD", "REDIS_PASSWORD"},
+		{"JWT_WEB_ACCESS_SECRET", "JWT_WEB_ACCESS_SECRET"},
+		{"OTP_FIXED_CODE", "OTP_FIXED_CODE"},
+		{"redis_password", "REDIS_PASSWORD"},
 	}
 	for _, tt := range tests {
-		got := envVarFromTag(tt.logical, tt.key)
+		got := envVarFromTag(tt.key)
 		if got != tt.want {
-			t.Fatalf("envVarFromTag(%q,%q)=%q want %q", tt.logical, tt.key, got, tt.want)
+			t.Fatalf("envVarFromTag(%q)=%q want %q", tt.key, got, tt.want)
 		}
 	}
 }
